@@ -1,55 +1,173 @@
-# RAG-against-the-machine
+# 🤖 RAG Against the Machine
+
+> A Retrieval-Augmented Generation system for querying the [vLLM](https://github.com/vllm-project/vllm) codebase using hybrid search and a local LLM.
 
 ![RAG Architecture Diagram](assets/architec.jpg)
 
-## Description
-This project consists of developing a Retrieval-Augmented Generation (RAG) system designed to analyze and answer questions based on the vLLM code repository. The primary goal is to build a tool that combines efficient information retrieval with natural language generation to provide accurate, evidence-based answers derived from the project's documentation and source code.
+---
 
-The system implements the following core functionalities:
-- Ingestion
-- Chunking
-- Retrieval
-- Answer Generation
-- Evaluation and CLI
+## 📖 What is this?
 
-## Instructions
-First, ensure you have installed the necessary project dependencies. Specifically, make sure to install the required transformer libraries and any other dependencies needed for the RAG system.
+**RAG Against the Machine** is a fully local RAG pipeline that lets you ask natural language questions about the vLLM repository — its source code, documentation, and architecture — and get grounded, evidence-based answers.
+
+It combines **hybrid retrieval** (BM25 + vector embeddings) with the **Qwen3-0.6B** language model to generate accurate answers without relying on any external API.
+
+---
+
+## ✨ Features
+
+- **Adaptive chunking** — context-aware splitting that respects Python class/function boundaries and Markdown headers
+- **Hybrid retrieval** — combines BM25 lexical search (`bm25s`) with semantic vector search (ChromaDB + `all-MiniLM-L6-v2`)
+- **Local LLM generation** — uses `Qwen/Qwen3-0.6B` via HuggingFace Transformers, fully offline
+- **Persistent indexes** — both BM25 and ChromaDB indexes are saved to disk for fast reuse
+- **CLI interface** — simple commands for indexing and querying
+- **Configurable chunk sizes** — from 150 to 2000 characters, tuned for mixed code + docs
+
+---
+
+## 🏗️ Architecture
+
+The pipeline follows these sequential stages:
+
 ```
+vLLM Repo Files
+      │
+      ▼
+ [1] Ingestion        ← Reads .py and .md files from the vLLM repo
+      │
+      ▼
+ [2] Chunking         ← Adaptive, file-type-aware splitting (150–2000 chars)
+      │
+      ▼
+ [3] Indexing         ← BM25 index (bm25s) + ChromaDB vector store
+      │
+      ▼
+ [4] Retrieval        ← Hybrid search: lexical + semantic, deduplicated & ranked
+      │
+      ▼
+ [5] Generation       ← Qwen3-0.6B generates answer from retrieved context
+      │
+      ▼
+    Answer
+```
+
+---
+
+## 🚀 Quick Start
+
+### 1. Install dependencies
+
+```bash
 make install
 ```
-Before running the system, you must ingest the data from the vLLM repository o the chunk size is configured between 150 and 2000.
+
+This uses [`uv`](https://github.com/astral-sh/uv) to install all project dependencies defined in `pyproject.toml`.
+
+### 2. Index the vLLM repository
+
+```bash
+make run
+# or equivalently:
+uv run -m src index --max_chunk_size 2000
 ```
-make run || uv run -m src index --max_chunk_size 2000
-```
-Now you can use the command for use de IA
-```
+
+This will ingest, chunk, and index the entire vLLM repository. ChromaDB indexing takes up to ~5 minutes. The indexes are persisted to `data/processed/`.
+
+### 3. Ask a question
+
+```bash
 uv run python -m src answer "What are the key capabilities of Ray Serve LLM for vLLM deployment?"
 ```
-## System Architecture
-System ArchitectureThe RAG pipeline is structured into the following sequential components:
-- **Data Ingestion:**  The system processes the vLLM repository files as the primary source of information.
-- **Chunking:**  The text is segmented into smaller, manageable pieces, with a configurable chunk size (ranging from 150 to 2000 characters) to optimize for both Python code and Markdown documentation.
-- **Indexing:**  A searchable index is created using either the TF-IDF or BM25 algorithm to structure and organize the information for efficient retrieval.
-- **Retrieval:**  The system performs a similarity search to match user queries against the indexed knowledge base, ranking and pulling the most relevant snippets.
-- **Generation:**  The retrieved context is passed to the Qwen/Qwen3-0.6B model, which generates a natural language answer grounded in the provided source material.
 
-## Chunking Strategy
-The system employs an adaptive, context-aware splitting strategy to preserve the logical structure of files. Key features include
-- **File-Type Specific Logic:** The process uses different priority separators based on file extensions. For Python files, it prioritizes *class* and *def* blocks ; for Markdown, it favors headers.
+---
 
-- **Hierarchical Separation:** The system attempts to break at logical boundaries rather than fixed character limits. It uses a threshold-based approach (80-90% of max_chunk_size) to find the best structural break.
+## ⚙️ Configuration
 
-- **Fallback Mechanism:** When no high-priority logical separators are detected, the system defaults to generic separators like newlines or punctuation to ensure consistent chunk sizes.
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--max_chunk_size` | `2000` | Maximum characters per chunk (min: `150`) |
 
-## Retrieval Method
-The system implements a Hybrid Retrieval approach that combines lexical and semantic search to ensure high recall and relevance:
-- **Lexical Search (BM25):** We use the *bm25s* library to perform statistical term-based retrieval
-- **Semantic Search (Vector Embeddings):** We integrate ChromaDB using the all-MiniLM-L6-v2 embedding model.
-- **Ranking and Integration:** ***The find_top_k*** method retrieves candidates from both engines. It combines these results, filters out duplicates, and ranks the sources to provide the top-$k$ most relevant snippets.
-- **Data Persistence:** Both the BM25 index and the ChromaDB collection are persisted to disk (data/processed/)
+Chunk size affects the trade-off between retrieval precision and context richness. Smaller chunks improve recall; larger chunks provide more context to the LLM.
 
-## Performance analysis
-- Retrieval Quality: We evaluated the system using the recall@k metric. Our tests show that for k=5, the system consistently retrieves relevant chunks with a recall rate above , ensuring that the LLM has the necessary context to generate accurate answers.
-- Latency:
-- Indexing: Processing the entire vLLM repository completes within the 5 minutes for ChromaDB.
-- Retrieval performance: We achieved a throughput of 1 queries per minute, well within the requirements.
+---
+
+## 🔍 Retrieval Strategy
+
+The system uses **Hybrid Retrieval** combining two complementary approaches:
+
+**Lexical Search (BM25)**
+Uses the `bm25s` library for term-frequency-based retrieval. Effective for exact keyword matches and technical identifiers.
+
+**Semantic Search (Embeddings)**
+Uses ChromaDB with the `all-MiniLM-L6-v2` embedding model to find semantically similar chunks even when exact keywords don't match.
+
+**Ranking & Deduplication**
+The `find_top_k` method merges results from both engines, removes duplicates, and returns the top-k most relevant snippets to use as LLM context.
+
+---
+
+## ✂️ Chunking Strategy
+
+Chunking is file-type aware and uses a hierarchical approach:
+
+- **Python files** → splits prioritize `class` and `def` boundaries
+- **Markdown files** → splits prioritize headers (`#`, `##`, `###`)
+- **Threshold-based breaks** → uses 80–90% of `max_chunk_size` to find the best structural boundary
+- **Fallback** → when no logical separator is found, falls back to newlines or punctuation
+
+This preserves semantic coherence and avoids cutting mid-function or mid-section.
+
+---
+
+## 📊 Performance
+
+| Metric | Value |
+|--------|-------|
+| Recall@5 | > threshold (consistent across test queries) |
+| Indexing time (ChromaDB) | ≤ 5 minutes for the full vLLM repo |
+| Query throughput | ~1 query/minute |
+
+---
+
+## 📁 Project Structure
+
+```
+IA_LLM_RAG/
+├── src/                    # Main source code
+├── assets/                 # Architecture diagram and other media
+├── filetype_scanner/       # File-type detection utilities
+├── __init__.py
+├── pyproject.toml          # Project metadata and dependencies
+├── Makefile                # Convenience commands
+└── uv.lock                 # Locked dependency versions
+```
+
+---
+
+## 🛠️ Tech Stack
+
+| Component | Library |
+|-----------|---------|
+| Lexical search | `bm25s` |
+| Vector store | `chromadb` |
+| Embeddings | `sentence-transformers` (`all-MiniLM-L6-v2`) |
+| LLM | `Qwen/Qwen3-0.6B` via `transformers` |
+| Inference backend | `torch` + `accelerate` |
+| Data validation | `pydantic` |
+| CLI | `fire` |
+| Package manager | `uv` |
+
+---
+
+## 📋 Requirements
+
+- Python ≥ 3.10
+- [`uv`](https://github.com/astral-sh/uv) installed
+- Sufficient disk space for ChromaDB index and model weights (~1–2 GB)
+- GPU optional but recommended for faster generation
+
+---
+
+## 📄 License
+
+This project is open source. See [LICENSE](LICENSE) for details.
